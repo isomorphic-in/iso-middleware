@@ -43,22 +43,24 @@ class ChatController {
         });
       }
 
+      const resolvedSessionId = sessionId || `sess_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`;
+      const resolvedBotId = (bot && (bot.botId || bot.code || bot._id?.toString())) || botId || 'isobot';
+      const resolvedTenantId = tenantId || (bot && (bot.tenantId || bot.tenantName)) || 'onestop';
+
       // 2. Generate Response with Intent Classification & RAG KNN Vector Search
       const result = await aiService.generateResponse({
         bot,
         query: userText.trim(),
         history,
-        tenantId,
-        botId
+        tenantId: resolvedTenantId,
+        botId: resolvedBotId,
+        sessionId: resolvedSessionId
       });
 
       const responseGivenAt = new Date();
       const botName = bot?.botName || bot?.name || 'ISO Bot';
 
       // 3. Persist Exchange to master > conversationHistory
-      const resolvedSessionId = sessionId || `sess_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`;
-      const resolvedBotId = (bot && (bot.botId || bot.code || bot._id?.toString())) || botId || 'isobot';
-      const resolvedTenantId = tenantId || (bot && (bot.tenantId || bot.tenantName)) || 'onestop';
 
       conversationService.recordExchange({
         sessionId: resolvedSessionId,

@@ -3,6 +3,7 @@ const queryRewriterService = require('./queryRewriterService');
 const ragSearchService = require('./ragSearchService');
 const llmService = require('./llmService');
 const genAISettingsService = require('./genAISettingsService');
+const conversationService = require('./conversationService');
 const logger = require('../helpers/logger');
 
 class AIService {
@@ -11,20 +12,59 @@ class AIService {
    * Query Rewriter, KNN Vector Search, and Groq/LLM generation, fully configured
    * via dynamic tenant genAISettings in MongoDB Atlas.
    */
-  async generateResponse({ bot, query, history = [], tenantId = '', botId = '' }) {
+  async generateResponse({ bot, query, history = [], tenantId = '', botId = '', sessionId = '' }) {
     const startTime = Date.now();
     const resolvedBotId = botId || (bot && (bot.botId || bot.code || bot._id?.toString())) || 'ISOBot';
     const resolvedTenantId = tenantId || (bot && (bot.tenantId || bot.tenantName)) || 'default';
+    const resolvedSessionId = sessionId || `sess_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`;
 
-    logger.info(`[AI Service] Processing query for tenant "${resolvedTenantId}", bot "${resolvedBotId}": "${query}"`);
+    logger.info(`[AI Service] Processing query for tenant "${resolvedTenantId}", bot "${resolvedBotId}", session "${resolvedSessionId}": "${query}"`);
+
+    // Resolve effective conversation history if not supplied in request
+    let effectiveHistory = Array.isArray(history) && history.length > 0 ? history : [];
+    if (effectiveHistory.length === 0 && resolvedSessionId) {
+      try {
+        const prevRecords = await conversationService.getHistory(resolvedSessionId, 10);
+        if (prevRecords && prevRecords.length > 0) {
+          effectiveHistory = [];
+          for (const r of prevRecords) {
+            if (r.query) effectiveHistory.push({ role: 'user', content: r.query, text: r.query, userQuery: r.query });
+            if (r.answer) effectiveHistory.push({ role: 'assistant', content: r.answer, text: r.answer, botResponse: r.answer, response: r.answer });
+          }
+        }
+      } catch (e) {
+        logger.warn(`[AI Service] Error resolving session history: ${e.message}`);
+      }
+    }
 
     // =========================================================================
-    // STEP 0: FETCH GEN AI SETTINGS FROM TENANT DATABASE
+    // STEP 0: FETCH GEN AI SETTINGS FROM TENANT DATABASE & CHECK TENANT CONFIG
     // =========================================================================
     const genAISettings = await genAISettingsService.getSettings({
       tenantId: resolvedTenantId,
       botId: resolvedBotId
     });
+
+    // Check if Grievance / Ticket feature is enabled for this tenant
+    let isGrievanceEnabled = true;
+    try {
+      if (resolvedTenantId && resolvedTenantId !== 'default') {
+        const mongoose = require('mongoose');
+        const masterDb = mongoose.connection.useDb('master', { useCache: true });
+        const tenantDoc = await masterDb.collection('tenantInfo').findOne({
+          $or: [
+            { tenantId: resolvedTenantId },
+            { code: resolvedTenantId },
+            { tenantName: new RegExp(`^${resolvedTenantId}$`, 'i') }
+          ]
+        });
+        if (tenantDoc && tenantDoc.tenantConfig && tenantDoc.tenantConfig.enableGrievanceSystem === false) {
+          isGrievanceEnabled = false;
+        }
+      }
+    } catch (e) {
+      logger.warn(`[AI Service] Could not fetch tenantConfig for grievance check: ${e.message}`);
+    }
 
     const botName = bot?.botName || bot?.name || 'ISO AI Assistant';
     const tenantFullName = genAISettings.tenantFullName || bot?.tenantName || resolvedTenantId;
@@ -50,11 +90,12 @@ class AIService {
     // =========================================================================
     const classification = await intentService.classifyIntent({
       query,
-      history,
+      history: effectiveHistory,
       bot,
       genAISettings,
       tenantId: resolvedTenantId,
-      botId: resolvedBotId
+      botId: resolvedBotId,
+      isGrievanceEnabled
     });
 
     logger.info(`[AI Service] Intent detected: "${classification.intent}" (${classification.reason || 'N/A'})`);
@@ -64,7 +105,7 @@ class AIService {
       const endChatRes = await intentService.handleEndChat({
         query,
         bot,
-        history,
+        history: effectiveHistory,
         genAISettings
       });
       const latencyMs = Date.now() - startTime;
@@ -87,7 +128,7 @@ class AIService {
       const smalltalkRes = await intentService.handleSmalltalk({
         query,
         bot,
-        history,
+        history: effectiveHistory,
         genAISettings
       });
       const latencyMs = Date.now() - startTime;
@@ -108,7 +149,7 @@ class AIService {
       const ambiguousRes = await intentService.handleAmbiguousQuery({
         query,
         bot,
-        history,
+        history: effectiveHistory,
         genAISettings
       });
       const latencyMs = Date.now() - startTime;
@@ -124,12 +165,61 @@ class AIService {
       };
     }
 
+    // 1D. Grievance / Complaint Registration Handler
+    if (classification.intent === 'grievance') {
+      const grievanceRes = await intentService.handleGrievance({
+        query,
+        bot,
+        history: effectiveHistory,
+        genAISettings,
+        tenantId: resolvedTenantId,
+        botId: resolvedBotId,
+        sessionId: resolvedSessionId
+      });
+      const latencyMs = Date.now() - startTime;
+      return {
+        text: grievanceRes.text,
+        intent: 'grievance',
+        ticketId: grievanceRes.ticketId,
+        category: grievanceRes.category,
+        department: grievanceRes.department,
+        priority: grievanceRes.priority,
+        retrievedChunks: [],
+        sources: [],
+        tokens: grievanceRes.tokens || { prompt: 25, completion: 80 },
+        latencyMs,
+        model: grievanceRes.model || 'system/grievance-engine',
+        provider: 'system'
+      };
+    }
+
+    // 1E. Check Ticket Status Handler
+    if (classification.intent === 'check_ticket') {
+      const ticketStatusRes = await intentService.handleCheckTicket({
+        query,
+        ticketId: classification.ticketId,
+        bot,
+        tenantId: resolvedTenantId
+      });
+      const latencyMs = Date.now() - startTime;
+      return {
+        text: ticketStatusRes.text,
+        intent: 'check_ticket',
+        retrievedChunks: [],
+        sources: [],
+        tokens: ticketStatusRes.tokens || { prompt: 20, completion: 70 },
+        latencyMs,
+        model: ticketStatusRes.model || 'system/grievance-engine',
+        provider: 'system'
+      };
+    }
+
     // =========================================================================
     // STEP 2: QUERY REWRITER & EXPANSION (using tenant genAISettings)
     // =========================================================================
     const expandedQueries = await queryRewriterService.rewriteAndExpandQuery({
       query,
-      history,
+      history: effectiveHistory,
       bot,
       genAISettings,
       tenantId: resolvedTenantId,
@@ -234,6 +324,13 @@ class AIService {
     } else {
       // Clean and properly format document citations into valid clickable markdown links
       finalAnswer = this.formatAndSanitizeCitations(finalAnswer, retrievedChunks);
+
+      // If grievance system is enabled and user asked about an issue, append subtle escalation option
+      const problemKeywords = ['issue', 'problem', 'delay', 'not received', 'not working', 'failed', 'deducted', 'missing', 'error', 'pending', 'stuck', "haven't", 'has not', 'complaint'];
+      const isProblemQuery = problemKeywords.some(kw => query.toLowerCase().includes(kw));
+      if (isGrievanceEnabled && isProblemQuery && !finalAnswer.toLowerCase().includes('raise a ticket')) {
+        finalAnswer += `\n\n*(💡 If this does not resolve your issue, you can reply **"Raise a ticket"** and I will create an official student grievance for staff review.)*`;
+      }
     }
 
     return {

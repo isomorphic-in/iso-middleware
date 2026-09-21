@@ -12,6 +12,7 @@ const adminRoutes = require('./adminRoutes');
 const authRoutes = require('./authRoutes');
 const clientRoutes = require('./clientRoutes');
 const ingestionRoutes = require('./ingestionRoutes');
+const grievanceRoutes = require('./grievanceRoutes');
 
 // Mount sub-routers under /api
 router.use('/', healthRoutes);
@@ -24,6 +25,7 @@ router.use('/', mongoRoutes);
 router.use('/', adminRoutes);
 router.use('/', authRoutes);
 router.use('/', clientRoutes);
+router.use('/', grievanceRoutes);
 router.use('/ingestion', ingestionRoutes);
 router.use('/admin/ingestion', ingestionRoutes);
 

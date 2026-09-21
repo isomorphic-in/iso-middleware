@@ -8,6 +8,7 @@ const Analytics = require('./Analytics');
 const User = require('./User');
 const RolePermission = require('./RolePermission');
 const SessionManagement = require('./SessionManagement');
+const Grievance = require('./Grievance');
 
 module.exports = {
   Tenant,
@@ -19,6 +20,7 @@ module.exports = {
   Analytics,
   User,
   RolePermission,
-  SessionManagement
+  SessionManagement,
+  Grievance
 };
 

@@ -144,6 +144,7 @@ class AdminController {
         faviconUrl: '',
         showIntegrationTypeInChatHistory: true,
         showJobQueueNotificationIcon: true,
+        enableGrievanceSystem: true,
         ...(tenantConfig || {})
       };
 
@@ -794,7 +795,26 @@ class AdminController {
     try {
       const mapped = await cacheService.wrap('portal:menus', async () => {
         const masterDb = mongoose.connection.useDb('master', { useCache: true });
-        const menus = await masterDb.collection('menus').find({}).sort({ sortOrder: 1 }).toArray();
+        let menus = await masterDb.collection('menus').find({}).sort({ sortOrder: 1 }).toArray();
+
+        // Ensure grievances menu is registered
+        const hasGrievances = menus.some(m => m.menuId === 'grievances');
+        if (!hasGrievances) {
+          const grievanceMenu = {
+            menuId: 'grievances',
+            label: 'Grievances & Tickets',
+            icon: 'Ticket',
+            path: 'grievances',
+            sortOrder: 2,
+            active: true,
+            description: 'AI Grievance & Student Ticket Management System',
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          await masterDb.collection('menus').insertOne(grievanceMenu);
+          menus = await masterDb.collection('menus').find({}).sort({ sortOrder: 1 }).toArray();
+        }
+
         return menus.map(m => ({ ...m, _id: m._id.toString() }));
       });
       return res.json(mapped);
