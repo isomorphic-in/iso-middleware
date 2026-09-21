@@ -410,6 +410,7 @@ class IngestionController {
 
         const results = [];
         const errors = [];
+        let skippedCount = 0;
 
         for (let i = 0; i < urls.length; i++) {
           // Check if user requested cancellation
@@ -439,20 +440,29 @@ class IngestionController {
               linkExpiry,
               expiryNotificationEnabled,
               notificationEmail,
-              tenantDbName
+              tenantDbName,
+              skipIfExists: true
             });
-            results.push(result);
 
-            jobManagerService.updateJob(activeJobId, {
-              stats: { ingestedCount: results.length }
-            });
-            jobManagerService.addLog(activeJobId, `[${i + 1}/${urls.length}] Ingested: ${targetUrl} (${result.totalChunks || 0} chunks)`, 'success');
+            if (result.skipped) {
+              skippedCount++;
+              jobManagerService.updateJob(activeJobId, {
+                stats: { ingestedCount: results.length, skippedCount }
+              });
+              jobManagerService.addLog(activeJobId, `[${i + 1}/${urls.length}] Skipped (Already Indexed): ${targetUrl}`, 'info');
+            } else {
+              results.push(result);
+              jobManagerService.updateJob(activeJobId, {
+                stats: { ingestedCount: results.length, skippedCount }
+              });
+              jobManagerService.addLog(activeJobId, `[${i + 1}/${urls.length}] Ingested: ${targetUrl} (${result.totalChunks || 0} chunks)`, 'success');
+            }
           } catch (itemErr) {
             logger.warn(`[Ingestion Controller] Batch item failed for "${targetUrl}": ${itemErr.message}`);
             errors.push({ url: targetUrl, error: itemErr.message });
 
             jobManagerService.updateJob(activeJobId, {
-              stats: { failedCount: errors.length }
+              stats: { failedCount: errors.length, skippedCount }
             });
             jobManagerService.addLog(activeJobId, `[${i + 1}/${urls.length}] Ingest failed: ${targetUrl} (${itemErr.message})`, 'warn');
           }
@@ -464,23 +474,28 @@ class IngestionController {
           return;
         }
 
-        const finalStatus = errors.length === urls.length ? 'failed' : 'completed';
+        const finalStatus = (errors.length === urls.length && urls.length > 0) ? 'failed' : 'completed';
         const batchResult = {
           jobId: activeJobId,
           total: urls.length,
-          successful: results.length,
+          ingested: results.length,
+          skipped: skippedCount,
           failed: errors.length,
-          results,
           errors
         };
 
         jobManagerService.updateJob(activeJobId, {
           status: finalStatus,
           progress: { current: urls.length, total: urls.length, percentage: 100, currentUrl: '' },
-          stats: { activeUrl: '' },
+          stats: {
+            activeUrl: '',
+            ingestedCount: results.length,
+            skippedCount,
+            failedCount: errors.length
+          },
           result: batchResult
         });
-        jobManagerService.addLog(activeJobId, `Batch ingestion finished: ${results.length} succeeded, ${errors.length} failed.`, 'info');
+        jobManagerService.addLog(activeJobId, `Batch ingestion finished: ${results.length} newly ingested, ${skippedCount} skipped (already indexed), ${errors.length} failed.`, finalStatus === 'completed' ? 'success' : 'error');
       });
 
       // Return immediately with HTTP 202 Accepted

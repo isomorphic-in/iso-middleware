@@ -25,6 +25,7 @@ class JobManagerService {
    */
   async init() {
     if (this._initialized) return;
+    if (mongoose.connection.readyState !== 1) return;
     try {
       const col = this.getJobsCollection();
       const docs = await col.find({}).sort({ createdAt: -1 }).limit(100).toArray();

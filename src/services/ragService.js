@@ -62,10 +62,16 @@ class RagService {
     linkExpiry,
     expiryNotificationEnabled = false,
     notificationEmail = '',
-    tenantDbName
+    tenantDbName,
+    skipIfExists = false
   }) {
     if (!url || !tenantId || !botId) {
       throw new Error('URL, tenantId, and botId are required for RAG ingestion.');
+    }
+
+    let targetUrl = url.trim();
+    if (!/^https?:\/\//i.test(targetUrl)) {
+      targetUrl = `https://${targetUrl}`;
     }
 
     // Resolve clean canonical tenantId and botId (never raw ObjectId)
@@ -79,8 +85,30 @@ class RagService {
     // Canonical vectorIndexName: strictly `${tenantId}_${botId}`
     const vectorIndexName = `${cleanTenantId.replace(/\s+/g, '_')}_${cleanBotId.replace(/\s+/g, '_')}`;
 
+    // Deduplication check: if skipIfExists is requested, check if URL is already indexed for this tenant/bot
+    if (skipIfExists) {
+      const existing = await sourcesCol.findOne({
+        sourceUrl: targetUrl,
+        $or: [{ botId: cleanBotId }, { botId }]
+      });
+      if (existing) {
+        logger.info(`[RAG Service] Skipping already ingested URL: ${targetUrl}`);
+        return {
+          _id: existing._id.toString(),
+          sourceId: existing._id.toString(),
+          title: existing.title,
+          sourceUrl: targetUrl,
+          totalChunks: existing.totalChunks || 0,
+          vectorIndexName: existing.vectorIndexName,
+          skipped: true,
+          alreadyIngested: true,
+          message: 'Already ingested and indexed.'
+        };
+      }
+    }
+
     // 1. Scrape webpage content
-    const scraped = await scraperService.scrapeUrl(url);
+    const scraped = await scraperService.scrapeUrl(targetUrl);
 
     // 2. Fetch bot's genAISettings from tenant database
     const genAISettings = await genAISettingsService.getSettings({
