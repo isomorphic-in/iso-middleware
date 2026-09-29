@@ -3,7 +3,7 @@ const crawlerService = require('../services/crawlerService');
 const jobManagerService = require('../services/jobManagerService');
 const logger = require('../helpers/logger');
 const mongoose = require('mongoose');
-const { cacheService } = require('../config/redis');
+const cacheService = require('../services/cacheService');
 
 class IngestionController {
   /**
@@ -26,16 +26,18 @@ class IngestionController {
 
       // 2. Try MongoDB master sessionManagement
       try {
-        const masterDbName = process.env.MONGO_MASTER_DB || 'master';
-        const db = mongoose.connection.useDb(masterDbName, { useCache: true });
-        const session = await db.collection('sessionManagement').findOne({ sessionId, isActive: true });
-        if (session) {
-          return {
-            username: session.username,
-            role: session.role || 'user',
-            tenantId: session.tenantId,
-            tenantName: session.tenantName
-          };
+        if (mongoose.connection.readyState === 1) {
+          const masterDbName = process.env.MONGO_MASTER_DB || 'master';
+          const db = mongoose.connection.useDb(masterDbName, { useCache: true });
+          const session = await db.collection('sessionManagement').findOne({ sessionId, isActive: true });
+          if (session) {
+            return {
+              username: session.username,
+              role: session.role || 'user',
+              tenantId: session.tenantId,
+              tenantName: session.tenantName
+            };
+          }
         }
       } catch (e) {}
     }

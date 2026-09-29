@@ -301,7 +301,7 @@ class GrievanceController {
       const staffMap = new Map();
 
       // 1. Fetch from tenant dynamic DB
-      if (targetTenantId && targetTenantId !== 'admin') {
+      if (mongoose.connection.readyState === 1 && targetTenantId && targetTenantId !== 'admin') {
         const targetDbName = targetTenantId.startsWith('iso_') ? targetTenantId : `iso_${targetTenantId}`;
         const dynamicDb = mongoose.connection.useDb(targetDbName, { useCache: true });
         const tenantUsers = await dynamicDb.collection('users').find({}, { projection: { password: 0 } }).toArray();

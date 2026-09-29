@@ -13,7 +13,7 @@ class RagService {
   async resolveCanonicalTenantId(tenantIdentifier) {
     if (!tenantIdentifier) return 'default';
     const str = String(tenantIdentifier).trim();
-    if (mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
       try {
         const masterDb = mongoose.connection.useDb('master', { useCache: true });
         const tenantDoc = await masterDb.collection('tenantInfo').findOne({ _id: new mongoose.Types.ObjectId(str) });
@@ -31,7 +31,7 @@ class RagService {
   async resolveCanonicalBotId(botIdentifier, tenantDb) {
     if (!botIdentifier) return 'default_bot';
     const str = String(botIdentifier).trim();
-    if (mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
       try {
         const botDoc = await tenantDb.collection('chatClientSettings').findOne({ _id: new mongoose.Types.ObjectId(str) });
         if (botDoc && (botDoc.botId || botDoc.code)) {

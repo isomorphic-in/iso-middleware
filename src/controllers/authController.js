@@ -70,14 +70,14 @@ class AuthController {
           allowedMenus = roleDoc.allowedMenus;
         } else if (userRole === 'Super Admin' || userRole === 'super_admin' || userRole === 'global_admin' || !tenantId) {
           const activeMenus = await masterDb.collection('menus').find({ active: true }).sort({ sortOrder: 1 }).toArray();
-          allowedMenus = activeMenus.length > 0 ? activeMenus.map(m => m.menuId) : ['tenants', 'grievances', 'analytics', 'ingestion', 'conversations', 'chat'];
+          allowedMenus = activeMenus.length > 0 ? activeMenus.map(m => m.menuId) : ['tenants', 'grievances', 'analytics', 'performance', 'ingestion', 'conversations', 'chat'];
         } else {
-          allowedMenus = ['grievances', 'analytics', 'ingestion', 'chat'];
+          allowedMenus = ['grievances', 'analytics', 'performance', 'ingestion', 'chat'];
         }
         return allowedMenus;
       } catch (err) {
         logger.error(`Error resolving allowed menus: ${err.message}`);
-        return ['tenants', 'grievances', 'analytics', 'ingestion', 'conversations', 'chat'];
+        return ['tenants', 'grievances', 'analytics', 'performance', 'ingestion', 'conversations', 'chat'];
       }
     });
   }
@@ -367,8 +367,17 @@ class AuthController {
         return res.status(401).json({ error: 'No active session token provided.', active: false });
       }
 
-      // Check Redis Cache first
-      const cacheKey = `session:token:${sessionId}`;
+      const requestedTenant = (
+        req.headers['x-tenant-id'] || 
+        req.query?.tenantId || 
+        req.query?.tenant || 
+        req.body?.tenantId || 
+        req.body?.tenant || 
+        ''
+      ).trim().toLowerCase();
+
+      // Check Redis Cache first (if no specific tenant check or if matched)
+      const cacheKey = `session:token:${sessionId}:${requestedTenant || 'default'}`;
       const cached = await cacheService.get(cacheKey);
       if (cached && cached.active) {
         return res.json(cached);
@@ -383,6 +392,54 @@ class AuthController {
           error: 'Session is invalid or does not exist.', 
           active: false 
         });
+      }
+
+      // Enforce strict cross-tenant isolation on session verification
+      if (requestedTenant) {
+        const sessionTenantId = (session.tenantId || '').toLowerCase();
+        const sessionTenantName = (session.tenantName || '').toLowerCase();
+        const isGlobalAdmin = session.role === 'global_admin' || session.role === 'super_admin' || sessionTenantId === 'admin';
+
+        let isMatch =
+          sessionTenantId === requestedTenant ||
+          sessionTenantName === requestedTenant ||
+          (isGlobalAdmin && requestedTenant === 'admin');
+
+        if (!isMatch) {
+          try {
+            const masterDb = this.getMasterDb();
+            const tDoc = await masterDb.collection('tenantInfo').findOne({
+              $or: [
+                { tenantId: new RegExp(`^${requestedTenant}$`, 'i') },
+                { code: new RegExp(`^${requestedTenant}$`, 'i') },
+                { tenantName: new RegExp(`^${requestedTenant}$`, 'i') },
+                { name: new RegExp(`^${requestedTenant}$`, 'i') }
+              ]
+            });
+            if (tDoc) {
+              const tId = (tDoc.tenantId || '').toLowerCase();
+              const tCode = (tDoc.code || '').toLowerCase();
+              const tName = (tDoc.tenantName || tDoc.name || '').toLowerCase();
+              const tOid = tDoc._id ? tDoc._id.toString().toLowerCase() : '';
+              if (
+                sessionTenantId === tId ||
+                sessionTenantId === tCode ||
+                sessionTenantId === tOid ||
+                sessionTenantName === tName
+              ) {
+                isMatch = true;
+              }
+            }
+          } catch (e) {}
+        }
+
+        if (!isMatch) {
+          return res.status(401).json({ 
+            error: `Session does not match the requested organization "${requestedTenant}".`, 
+            active: false,
+            tenantMismatch: true 
+          });
+        }
       }
 
       const now = Date.now();
@@ -443,6 +500,7 @@ class AuthController {
 
       // Resolve tenantConfig from master.tenantInfo
       let targetTenantConfig = session.tenantConfig || {};
+      let tenantCode = session.tenantId || '';
       if (session.tenantId) {
         try {
           const masterDb = this.getMasterDb();
@@ -453,8 +511,9 @@ class AuthController {
               ...(mongoose.Types.ObjectId.isValid(session.tenantId) ? [{ _id: new mongoose.Types.ObjectId(session.tenantId) }] : [])
             ]
           });
-          if (tDoc && tDoc.tenantConfig) {
-            targetTenantConfig = tDoc.tenantConfig;
+          if (tDoc) {
+            if (tDoc.tenantConfig) targetTenantConfig = tDoc.tenantConfig;
+            if (tDoc.code) tenantCode = tDoc.code;
           }
         } catch (tErr) {}
       }
@@ -467,6 +526,7 @@ class AuthController {
           username: session.username,
           role: session.role,
           tenantId: session.tenantId,
+          code: tenantCode,
           tenantName: session.tenantName,
           tenantConfig: targetTenantConfig,
           fullName: tenantUser?.fullName || session.fullName || session.username,

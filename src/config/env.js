@@ -33,9 +33,6 @@ for (const envPath of envCandidatePaths) {
   }
 }
 
-const DEFAULT_ATLAS_URI = 'mongodb+srv://shivamblackbelthelp_db_user:JT9PzrQlrqX7kGFr@iso.voyrhxh.mongodb.net/?appName=Iso';
-const DEFAULT_GROQ_KEY = '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';
-
 const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -46,7 +43,7 @@ const env = {
   HOST: process.env.HOST || '0.0.0.0',
 
   // MongoDB Configuration
-  MONGODB_URI: process.env.MONGODB_URI || DEFAULT_ATLAS_URI,
+  MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/isochat',
   MONGODB_DB_NAME: process.env.MONGODB_DB_NAME || 'isochat',
   MONGODB_POOL_SIZE: parseInt(process.env.MONGODB_POOL_SIZE || '10', 10),
 
@@ -54,7 +51,7 @@ const env = {
   CORS_ORIGIN: process.env.CORS_ORIGIN || '*',
 
   // AI Service Settings
-  GROQ_API_KEY: process.env.GROQ_API_KEY || DEFAULT_GROQ_KEY,
+  GROQ_API_KEY: process.env.GROQ_API_KEY || '',
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
   OPENAI_MODEL: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
@@ -68,8 +65,8 @@ const env = {
   DEFAULT_TENANT_CODE: process.env.DEFAULT_TENANT_CODE || 'default',
   DEFAULT_BOT_ID: process.env.DEFAULT_BOT_ID || 'ISOBot',
 
-  // Redis Cloud Cache Configuration
-  REDIS_URI: process.env.REDIS_URI || 'redis://default:HScw2zP1ioK09sDS9vrliKLvtuHzPGt1@stouthearted-root-branch-87084.db.redis.io:16166',
+  // Redis Cache Configuration
+  REDIS_URI: process.env.REDIS_URI || 'redis://localhost:6379',
   REDIS_CACHE_TTL: parseInt(process.env.REDIS_CACHE_TTL || '600', 10) // 10 minutes (600 seconds)
 };
 

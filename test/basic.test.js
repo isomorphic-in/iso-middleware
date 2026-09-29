@@ -78,6 +78,26 @@ async function runTests() {
   assert(typeof cacheService.delPattern === 'function', 'delPattern should exist on cacheService');
   console.log('✔ CacheService scanStream delPattern test passed');
 
+  // 11. Test Ingestion Controller User Resolver
+  const ingestionController = require('../src/controllers/ingestionController');
+  const resolvedUser = await ingestionController.resolveUser({ headers: {}, body: { createdBy: 'test_user' } });
+  assert(resolvedUser.username === 'test_user', 'resolveUser should resolve body createdBy');
+  console.log('✔ IngestionController resolveUser test passed');
+
+  // 12. Test RAG Search Safe Execution when DB is offline
+  const ragSearchService = require('../src/services/ragSearchService');
+  const ragResults = await ragSearchService.performKnnSearch({ queries: ['test query'], tenantId: 'test_tenant', botId: 'test_bot' });
+  assert(Array.isArray(ragResults) && ragResults.length === 0, 'performKnnSearch should return empty array safely');
+  console.log('✔ RAGSearchService offline safety test passed');
+
+  // 13. Test Crawler Service URL Normalization & Filtering
+  const crawlerService = require('../src/services/crawlerService');
+  const normalized = crawlerService.normalizeUrl('/about-us#team', 'https://example.com/home');
+  assert(normalized === 'https://example.com/about-us', `Normalized URL mismatch: ${normalized}`);
+  assert(crawlerService.isUrlAllowed('https://example.com/blog', ['*blog*'], ['*admin*']) === true, 'Include pattern should match');
+  assert(crawlerService.isUrlAllowed('https://example.com/admin/settings', [], ['*admin*']) === false, 'Exclude pattern should block');
+  console.log('✔ CrawlerService URL normalization and pattern filtering test passed');
+
   console.log('\nAll tests passed successfully! 🎉');
 }
 

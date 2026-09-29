@@ -37,7 +37,7 @@ class RagSearchService {
   async resolveCanonicalTenantId(tenantIdentifier) {
     if (!tenantIdentifier) return 'default';
     const str = String(tenantIdentifier).trim();
-    if (mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
       try {
         const masterDb = this.getTenantDb('master', 'master');
         const tenantDoc = await masterDb.collection('tenantInfo').findOne({ _id: new mongoose.Types.ObjectId(str) });
@@ -55,7 +55,7 @@ class RagSearchService {
   async resolveCanonicalBotId(botIdentifier, tenantDb) {
     if (!botIdentifier) return 'default_bot';
     const str = String(botIdentifier).trim();
-    if (mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
       try {
         const botDoc = await tenantDb.collection('chatClientSettings').findOne({ _id: new mongoose.Types.ObjectId(str) });
         if (botDoc && (botDoc.botId || botDoc.code)) {
@@ -77,7 +77,7 @@ class RagSearchService {
     scoreThreshold = 0.05,
     tenantDbName
   }) {
-    if (!tenantId || !botId || !queries || queries.length === 0) {
+    if (!tenantId || !botId || !queries || queries.length === 0 || mongoose.connection.readyState !== 1) {
       return [];
     }
 

@@ -48,5 +48,10 @@ router.delete('/admin/conversations/:sessionId', (req, res, next) => adminContro
 router.get('/admin/analytics', (req, res, next) => adminController.getAnalyticsDashboard(req, res, next));
 router.get('/analytics', (req, res, next) => adminController.getAnalyticsDashboard(req, res, next));
 
+// Bot Performance Dashboard API
+router.get('/admin/performance', (req, res, next) => adminController.getPerformanceDashboard(req, res, next));
+router.get('/performance', (req, res, next) => adminController.getPerformanceDashboard(req, res, next));
+
 module.exports = router;
+
 
