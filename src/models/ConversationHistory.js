@@ -81,4 +81,7 @@ const conversationHistorySchema = new mongoose.Schema({
 conversationHistorySchema.index({ tenantId: 1, botId: 1, createdAt: -1 });
 conversationHistorySchema.index({ sessionId: 1, createdAt: 1 });
 
-module.exports = conversationHistorySchema;
+const ConversationHistory = mongoose.models.ConversationHistory || mongoose.model('ConversationHistory', conversationHistorySchema);
+ConversationHistory.schema = conversationHistorySchema;
+
+module.exports = ConversationHistory;

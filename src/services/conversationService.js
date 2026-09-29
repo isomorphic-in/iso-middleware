@@ -6,6 +6,10 @@ class ConversationService {
    * Helper: Get native master database connection
    */
   getMasterDb() {
+    if (mongoose.connection.readyState !== 1) {
+      return null;
+    }
+
     const client = mongoose.connection?.client 
       || (mongoose.connection && typeof mongoose.connection.getClient === 'function' && mongoose.connection.getClient())
       || (mongoose.connections && mongoose.connections[0] && mongoose.connections[0].client);
@@ -40,6 +44,9 @@ class ConversationService {
 
     try {
       const masterDb = this.getMasterDb();
+      if (!masterDb || typeof masterDb.collection !== 'function') {
+        return null;
+      }
       const col = masterDb.collection('conversationHistory');
 
       // 1. Resolve sessionStartAt from the earliest chat document with this sessionId
@@ -122,6 +129,9 @@ class ConversationService {
 
     try {
       const masterDb = this.getMasterDb();
+      if (!masterDb || typeof masterDb.collection !== 'function') {
+        return null;
+      }
       const col = masterDb.collection('conversationHistory');
 
       const endAt = new Date();
@@ -224,12 +234,42 @@ class ConversationService {
     if (!sessionId) return [];
     try {
       const masterDb = this.getMasterDb();
+      if (!masterDb || typeof masterDb.collection !== 'function') {
+        return [];
+      }
       const col = masterDb.collection('conversationHistory');
       return await col.find({ sessionId }).sort({ createdAt: 1 }).limit(limit).toArray();
     } catch (err) {
       logger.error(`[Conversation Service] Error fetching history for session "${sessionId}": ${err.message}`);
       return [];
     }
+  }
+
+  /**
+   * Generate text transcript of chat session
+   */
+  async generateTranscript(sessionId) {
+    if (!sessionId) return null;
+    const history = await this.getHistory(sessionId, 200);
+    if (!history || history.length === 0) return null;
+
+    const lines = [];
+    lines.push(`=======================================================`);
+    lines.push(` CHAT CONVERSATION TRANSCRIPT: ${sessionId}`);
+    lines.push(` Exported At: ${new Date().toISOString()}`);
+    lines.push(`=======================================================\n`);
+
+    history.forEach((turn) => {
+      const time = turn.queryReceivedAt || turn.createdAt ? new Date(turn.queryReceivedAt || turn.createdAt).toLocaleTimeString() : '';
+      if (turn.query) {
+        lines.push(`[${time}] User: ${turn.query}`);
+      }
+      if (turn.answer) {
+        lines.push(`[${time}] Assistant: ${turn.answer}\n`);
+      }
+    });
+
+    return lines.join('\n');
   }
 }
 

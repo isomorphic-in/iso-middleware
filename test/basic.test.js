@@ -43,6 +43,41 @@ async function runTests() {
   assert(transferRes.form === 'transferCall', 'Should trigger transferCall form for human agent request');
   console.log('✔ AI intent detection test passed');
 
+  // 5. Test Conversation History Model Export
+  const { ConversationHistory } = require('../src/models');
+  assert(typeof ConversationHistory === 'function', 'ConversationHistory should be a Mongoose model constructor');
+  console.log('✔ ConversationHistory model export test passed');
+
+  // 6. Test Conversation Transcript Generator
+  const conversationService = require('../src/services/conversationService');
+  assert(typeof conversationService.generateTranscript === 'function', 'generateTranscript should exist on conversationService');
+  console.log('✔ ConversationService transcript method test passed');
+
+  // 7. Test Bot Service CRUD Methods
+  const botService = require('../src/services/botService');
+  assert(typeof botService.getBotById === 'function', 'getBotById should exist on botService');
+  assert(typeof botService.createBot === 'function', 'createBot should exist on botService');
+  assert(typeof botService.updateBot === 'function', 'updateBot should exist on botService');
+  assert(typeof botService.deleteBot === 'function', 'deleteBot should exist on botService');
+  console.log('✔ BotService CRUD methods test passed');
+
+  // 8. Test Admin Controller Raw Update & Duplicate Methods
+  const adminController = require('../src/controllers/adminController');
+  assert(typeof adminController.rawUpdateBot === 'function', 'rawUpdateBot should exist on adminController');
+  assert(typeof adminController.duplicateBot === 'function', 'duplicateBot should exist on adminController');
+  console.log('✔ AdminController bot duplicate & raw update methods test passed');
+
+  // 9. Test Analytics Service Robust BotId Handling
+  const analyticsService = require('../src/services/analyticsService');
+  const nullAnalytics = await analyticsService.getBotAnalytics(null);
+  assert(nullAnalytics === null, 'getBotAnalytics should safely return null on null botId');
+  console.log('✔ AnalyticsService safe botId handling test passed');
+
+  // 10. Test Cache Service DelPattern Function
+  const cacheService = require('../src/services/cacheService');
+  assert(typeof cacheService.delPattern === 'function', 'delPattern should exist on cacheService');
+  console.log('✔ CacheService scanStream delPattern test passed');
+
   console.log('\nAll tests passed successfully! 🎉');
 }
 

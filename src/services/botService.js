@@ -155,6 +155,116 @@ class BotService {
   }
 
   /**
+   * Get single bot by ID from dynamic tenant DB
+   */
+  async getBotById(id, tenantName = 'default') {
+    return this.findBotDocument(id, tenantName);
+  }
+
+  /**
+   * Create a new bot in dynamic tenant DB
+   */
+  async createBot(botData = {}) {
+    const tenantName = botData.tenantId || botData.tenantName || 'default';
+    const cleanTenant = this.resolveDbName(tenantName);
+    const tenantDb = this.getTenantDb(tenantName);
+    const collection = tenantDb.collection('chatClientSettings');
+
+    const botId = (botData.code || botData.botId || `bot_${Date.now()}`).toLowerCase().trim();
+    const botName = botData.name || botData.botName || 'AI Assistant';
+
+    const doc = {
+      botId,
+      code: botId,
+      botName,
+      name: botName,
+      description: botData.description || '',
+      model: botData.model || 'gpt-4o-mini',
+      temperature: botData.temperature !== undefined ? Number(botData.temperature) : 0.7,
+      systemPrompt: botData.systemPrompt || 'You are an intelligent, friendly AI assistant.',
+      status: botData.status || 'active',
+      botActive: botData.status !== 'inactive',
+      greetingMessage: botData.greetingMessage || DEFAULT_GREETING_MESSAGE,
+      welcomeMessage: botData.welcomeMessage || 'Hi! I’m your AI assistant. How can I assist you today?',
+      quickReplies: botData.quickReplies || ['What can you do?', 'Contact support', 'Documentation'],
+      customForms: botData.customForms || DEFAULT_CUSTOM_FORMS,
+      botUIConfigs: {
+        ...DEFAULT_BOT_UI_CONFIGS,
+        ...(botData.botUIConfigs || {}),
+        botHeaderText: botData.botUIConfigs?.botHeaderText || botName
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const res = await collection.insertOne(doc);
+    const createdBot = { ...doc, _id: res.insertedId.toString() };
+    await this.invalidateBotCache(tenantName, botId);
+    return createdBot;
+  }
+
+  /**
+   * Update bot in dynamic tenant DB
+   */
+  async updateBot(id, updateData = {}, tenantName = 'default') {
+    const cleanTenant = this.resolveDbName(tenantName);
+    const tenantDb = this.getTenantDb(tenantName);
+    const collection = tenantDb.collection('chatClientSettings');
+
+    let filter = {};
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      filter = { $or: [{ _id: new mongoose.Types.ObjectId(id) }, { botId: id }, { code: id }] };
+    } else {
+      filter = { $or: [{ botId: id }, { code: id }] };
+    }
+
+    const setPayload = {
+      ...updateData,
+      updatedAt: new Date()
+    };
+    if (setPayload._id) delete setPayload._id;
+    if (setPayload.status !== undefined) {
+      setPayload.botActive = setPayload.status === 'active';
+    }
+
+    const res = await collection.findOneAndUpdate(
+      filter,
+      { $set: setPayload },
+      { returnDocument: 'after' }
+    );
+
+    const updated = (res && res.value !== undefined) ? res.value : res;
+    if (updated) {
+      await this.invalidateBotCache(tenantName, updated.botId || id);
+      return { ...updated, _id: updated._id.toString() };
+    }
+    return null;
+  }
+
+  /**
+   * Delete bot from dynamic tenant DB
+   */
+  async deleteBot(id, tenantName = 'default') {
+    const cleanTenant = this.resolveDbName(tenantName);
+    const tenantDb = this.getTenantDb(tenantName);
+    const collection = tenantDb.collection('chatClientSettings');
+
+    let filter = {};
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      filter = { $or: [{ _id: new mongoose.Types.ObjectId(id) }, { botId: id }, { code: id }] };
+    } else {
+      filter = { $or: [{ botId: id }, { code: id }] };
+    }
+
+    const bot = await collection.findOne(filter);
+    if (!bot) return null;
+
+    await collection.deleteOne(filter);
+    await this.invalidateBotCache(tenantName, bot.botId || id);
+    return true;
+  }
+
+  /**
    * Invalidate bot cache on update/create
    */
   async invalidateBotCache(tenantName, botId) {

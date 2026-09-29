@@ -48,8 +48,7 @@ class AIService {
     // Check if Grievance / Ticket feature is enabled for this tenant
     let isGrievanceEnabled = true;
     try {
-      if (resolvedTenantId && resolvedTenantId !== 'default') {
-        const mongoose = require('mongoose');
+      if (resolvedTenantId && resolvedTenantId !== 'default' && mongoose.connection.readyState === 1) {
         const masterDb = mongoose.connection.useDb('master', { useCache: true });
         const tenantDoc = await masterDb.collection('tenantInfo').findOne({
           $or: [
@@ -210,6 +209,29 @@ class AIService {
         tokens: ticketStatusRes.tokens || { prompt: 20, completion: 70 },
         latencyMs,
         model: ticketStatusRes.model || 'system/grievance-engine',
+        provider: 'system'
+      };
+    }
+
+    // 1F. Live Agent / Transfer Call Handler
+    if (classification.intent === 'transfer_call') {
+      const transferRes = await intentService.handleTransferCall({
+        query,
+        bot,
+        history: effectiveHistory,
+        genAISettings
+      });
+      const latencyMs = Date.now() - startTime;
+      return {
+        text: transferRes.text,
+        intent: 'transfer_call',
+        isTransferCall: true,
+        form: 'transferCall',
+        retrievedChunks: [],
+        sources: [],
+        tokens: transferRes.tokens || { prompt: 20, completion: 40 },
+        latencyMs,
+        model: transferRes.model || 'system/transfer-engine',
         provider: 'system'
       };
     }

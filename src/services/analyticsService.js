@@ -95,12 +95,18 @@ class AnalyticsService {
    * Fetch analytics for a given bot
    */
   async getBotAnalytics(botId) {
+    if (!botId) return null;
+    const strBotId = String(botId).trim();
     let query = {};
-    if (botId.match(/^[0-9a-fA-F]{24}$/)) {
-      query = { botId };
+    if (strBotId.match(/^[0-9a-fA-F]{24}$/)) {
+      query = { botId: strBotId };
     } else {
-      const bot = await Bot.findOne({ code: botId });
-      if (bot) query = { botId: bot._id };
+      const bot = await Bot.findOne({ $or: [{ code: strBotId }, { botId: strBotId }] });
+      if (bot) {
+        query = { $or: [{ botId: bot._id }, { botId: strBotId }] };
+      } else {
+        query = { botId: strBotId };
+      }
     }
 
     return Analytics.findOne(query).lean();

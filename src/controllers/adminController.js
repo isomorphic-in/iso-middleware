@@ -659,6 +659,97 @@ class AdminController {
   }
 
   /**
+   * PUT /api/admin/bots/:id/raw
+   * Direct raw JSON configuration update of bot document in tenant DB
+   */
+  async rawUpdateBot(req, res, next) {
+    return this.updateBot(req, res, next);
+  }
+
+  /**
+   * POST /api/admin/bots/:id/duplicate
+   * Clone an existing bot with a unique botId/name in tenant DB
+   */
+  async duplicateBot(req, res, next) {
+    try {
+      const { id } = req.params;
+      const tenantId = req.query.tenantId || req.body.tenantId || req.query.tenantDbName;
+
+      let resolved = null;
+      if (tenantId) {
+        resolved = await this.resolveTenantDb(tenantId);
+      }
+
+      if (!resolved || !resolved.db) {
+        const col = this.getTenantInfoCollection();
+        const allTenants = await col.find({}).toArray();
+        for (const t of allTenants) {
+          const tDb = mongoose.connection.useDb(t.tenantDbName || `iso_${t.tenantId}`);
+          const found = await tDb.collection('chatClientSettings').findOne({
+            $or: [
+              ...(mongoose.Types.ObjectId.isValid(id) ? [{ _id: new mongoose.Types.ObjectId(id) }] : []),
+              { botId: id }
+            ]
+          });
+          if (found) {
+            resolved = { db: tDb, dbName: t.tenantDbName || `iso_${t.tenantId}`, tenantDoc: t };
+            break;
+          }
+        }
+      }
+
+      if (!resolved || !resolved.db) {
+        return res.status(404).json({ error: 'Source bot document not found.' });
+      }
+
+      const { db, dbName, tenantDoc } = resolved;
+      let filter = {};
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        filter = { _id: new mongoose.Types.ObjectId(id) };
+      } else {
+        filter = { $or: [{ botId: id }, { code: id }] };
+      }
+
+      const sourceBot = await db.collection('chatClientSettings').findOne(filter);
+      if (!sourceBot) {
+        return res.status(404).json({ error: 'Source bot not found.' });
+      }
+
+      const copySuffix = Math.floor(100 + Math.random() * 900);
+      const newBotId = req.body.code || req.body.botId || `${sourceBot.botId || sourceBot.code || 'bot'}_copy_${copySuffix}`;
+      const newBotName = req.body.name || req.body.botName || `${sourceBot.botName || sourceBot.name || 'Bot'} (Copy)`;
+
+      const clonedDoc = {
+        ...sourceBot,
+        _id: new mongoose.Types.ObjectId(),
+        botId: newBotId.toLowerCase().trim(),
+        code: newBotId.toLowerCase().trim(),
+        botName: newBotName,
+        name: newBotName,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        updatedSince: new Date()
+      };
+
+      await db.collection('chatClientSettings').insertOne(clonedDoc);
+      await db.collection('chatClients').insertOne(clonedDoc).catch(() => {});
+
+      if (tenantDoc) {
+        await this.getTenantInfoCollection().updateOne(
+          { _id: tenantDoc._id },
+          { $addToSet: { Bots: newBotId } }
+        ).catch(() => {});
+      }
+
+      logger.info(`Duplicated bot "${id}" as "${newBotId}" in tenant DB "${dbName}"`);
+      return res.status(201).json(clonedDoc);
+    } catch (err) {
+      logger.error(`Error duplicating bot: ${err.message}`);
+      next(err);
+    }
+  }
+
+  /**
    * DELETE /api/admin/bots/:id
    * Delete chatbot document from dynamic tenant DB
    */

@@ -39,10 +39,20 @@ async function startServer() {
 async function handleShutdown(signal) {
   logger.info(`Received ${signal}. Initiating graceful shutdown...`);
 
+  // Stop background workers
+  try {
+    expiryWorker.stop();
+  } catch (e) {}
+
   if (server) {
     server.close(async () => {
       logger.info('HTTP server closed.');
       try {
+        const { getRedisClient } = require('./config/redis');
+        const redisClient = getRedisClient();
+        if (redisClient) {
+          await redisClient.quit().catch(() => {});
+        }
         await disconnectDB();
         logger.info('Graceful shutdown completed successfully.');
         process.exit(0);

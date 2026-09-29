@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const logger = require('../helpers/logger');
-const { cacheService } = require('../config/redis');
+const cacheService = require('./cacheService');
 
 class JobManagerService {
   constructor() {

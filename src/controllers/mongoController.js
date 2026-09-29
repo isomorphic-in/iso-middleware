@@ -93,6 +93,13 @@ class MongoController {
         return ApiResponse.badRequest(res, 'Invalid JSON format for filter parameter');
       }
 
+      // Sanitize filter to prevent arbitrary code execution or operator injection
+      if (parsedFilter && typeof parsedFilter === 'object') {
+        delete parsedFilter.$where;
+        delete parsedFilter.$accumulator;
+        delete parsedFilter.$function;
+      }
+
       // Build projection
       let projection = {};
       if (fields && typeof fields === 'string') {
@@ -200,11 +207,12 @@ class MongoController {
         { returnDocument: 'after' }
       );
 
-      if (!result || !result.value) {
+      const updatedDoc = (result && result.value !== undefined) ? result.value : result;
+      if (!updatedDoc) {
         return ApiResponse.notFound(res, 'Document not found');
       }
 
-      return ApiResponse.success(res, result.value, `Document updated in ${cleanColName}`);
+      return ApiResponse.success(res, updatedDoc, `Document updated in ${cleanColName}`);
     } catch (err) {
       next(err);
     }

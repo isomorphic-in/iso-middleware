@@ -65,10 +65,7 @@ class ClientController {
       const bot = await Bot.findById(req.params.id);
       if (!bot) return res.status(404).json({ error: 'Bot not found.' });
 
-      const source = bot.ingestionSources.id(req.params.sourceId);
-      if (!source) return res.status(404).json({ error: 'Ingestion source not found.' });
-
-      source.remove();
+      bot.ingestionSources.pull(req.params.sourceId);
       await bot.save();
       return res.json(bot);
     } catch (err) {

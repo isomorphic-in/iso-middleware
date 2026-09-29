@@ -54,12 +54,15 @@ class ExpiryWorker {
    * Automatically end chat sessions that have been idle for more than 20 minutes
    */
   async checkInactiveSessions() {
+    if (mongoose.connection.readyState !== 1) return;
+
     try {
       const client = mongoose.connection?.client 
         || (mongoose.connection && typeof mongoose.connection.getClient === 'function' && mongoose.connection.getClient())
         || (mongoose.connections && mongoose.connections[0] && mongoose.connections[0].client);
 
       const masterDb = client ? client.db('master') : mongoose.connection.useDb('master').db;
+      if (!masterDb || typeof masterDb.collection !== 'function') return;
       const col = masterDb.collection('conversationHistory');
 
       const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
@@ -102,6 +105,8 @@ class ExpiryWorker {
    * Scan all active tenant databases for expired knowledge sources
    */
   async checkExpiringLinks() {
+    if (mongoose.connection.readyState !== 1) return;
+
     try {
       const masterDb = mongoose.connection.useDb('master', { useCache: true });
       const tenants = await masterDb.collection('tenantInfo').find({ tenantActive: true }).toArray();
@@ -121,6 +126,32 @@ class ExpiryWorker {
 
         for (const s of expiringSources) {
           logger.warn(`[Expiry Worker] 🚨 LINK EXPIRED: "${s.sourceUrl}" for Bot "${s.botName}" (${s.botId}) in Tenant "${s.tenantName}". Email Alert To: ${s.notificationEmail || 'N/A'}`);
+
+          // Send notification email if configured
+          if (s.notificationEmail && s.notificationEmail.includes('@')) {
+            try {
+              const emailService = require('./emailService');
+              const orgTitle = t.tenantName || t.name || 'ISO Knowledge Base';
+              const subject = `⚠️ Knowledge Source Link Expired - ${s.title || s.sourceUrl}`;
+              const textContent = `Hello,\n\nThe following knowledge source link for Bot "${s.botName || s.botId}" has expired:\n\nURL: ${s.sourceUrl}\nExpiry Date: ${new Date(s.linkExpiry).toISOString()}\n\nPlease update or rescrape this resource in your admin portal.\n\nBest regards,\n${orgTitle} Admin Engine`;
+              
+              if (process.env.GMAIL_SCRIPT_URL || process.env.SMTP_USER) {
+                const axios = require('axios');
+                const scriptUrl = (process.env.GMAIL_SCRIPT_URL || process.env.GOOGLE_SCRIPT_URL || '').trim();
+                if (scriptUrl) {
+                  await axios.post(scriptUrl, {
+                    to: s.notificationEmail,
+                    subject,
+                    html: `<p>The following knowledge source link for Bot <strong>${s.botName || s.botId}</strong> in <strong>${orgTitle}</strong> has expired:</p><p><a href="${s.sourceUrl}">${s.sourceUrl}</a></p><p>Expired on: ${new Date(s.linkExpiry).toLocaleString()}</p>`,
+                    text: textContent,
+                    senderName: orgTitle
+                  }).catch(() => {});
+                }
+              }
+            } catch (mailErr) {
+              logger.warn(`[Expiry Worker] Failed to send link expiry notification: ${mailErr.message}`);
+            }
+          }
 
           // Mark status as expired & notificationSent as true
           await tenantDb.collection('ingestion_sources').updateOne(

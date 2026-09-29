@@ -60,17 +60,45 @@ class CacheService {
 
   /**
    * Delete all keys matching a wildcard pattern (e.g. 'bot:*', 'genai:*')
+   * Uses non-blocking SCAN stream to prevent freezing Redis event loop
    */
   async delPattern(pattern) {
     if (!isRedisReady()) return false;
     try {
       const client = getRedisClient();
-      const keys = await client.keys(pattern);
-      if (keys && keys.length > 0) {
-        await client.del(...keys);
-        logger.info(`[CacheService] Invalidation: deleted ${keys.length} keys matching "${pattern}"`);
-      }
-      return true;
+      if (!client) return false;
+
+      return new Promise((resolve) => {
+        const stream = client.scanStream({
+          match: pattern,
+          count: 100
+        });
+
+        let totalDeleted = 0;
+
+        stream.on('data', async (keys = []) => {
+          if (keys.length > 0) {
+            stream.pause();
+            try {
+              await client.del(...keys);
+              totalDeleted += keys.length;
+            } catch (e) {}
+            stream.resume();
+          }
+        });
+
+        stream.on('end', () => {
+          if (totalDeleted > 0) {
+            logger.info(`[CacheService] Invalidation: deleted ${totalDeleted} keys matching "${pattern}"`);
+          }
+          resolve(true);
+        });
+
+        stream.on('error', (err) => {
+          logger.warn(`[CacheService] delPattern stream error for pattern "${pattern}": ${err.message}`);
+          resolve(false);
+        });
+      });
     } catch (err) {
       logger.warn(`[CacheService] delPattern error for pattern "${pattern}": ${err.message}`);
       return false;

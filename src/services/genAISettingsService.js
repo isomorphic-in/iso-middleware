@@ -159,6 +159,10 @@ class GenAISettingsService {
     const cacheKey = `genai:settings:${cleanTenant}:${cleanBot}`;
 
     return cacheService.wrap(cacheKey, async () => {
+      if (mongoose.connection.readyState !== 1) {
+        return this.getDefaultSettings(botId, tenantId);
+      }
+
       try {
         const tenantDb = this.getTenantDb(tenantId, tenantDbName);
         const col = tenantDb.collection('genAISettings');

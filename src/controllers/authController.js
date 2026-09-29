@@ -226,24 +226,6 @@ class AuthController {
           } catch (e) {}
         }
 
-        // Demo fallback ONLY for the 'admin' tenant
-        if (!authenticatedUser && (targetTenantDoc.tenantId === 'admin' || targetTenantDoc.code === 'admin')) {
-          if (cleanUsername.toLowerCase() === 'admin' && (cleanPassword === 'admin123' || cleanPassword === 'password' || cleanPassword === 'password123' || cleanPassword === 'admin')) {
-            authenticatedUser = {
-              username: 'admin',
-              role: 'global_admin',
-              tenantId: 'admin',
-              tenantName: 'admin',
-              fullName: 'Super Administrator',
-              email: 'admin@isomorphic.com',
-              phone: '',
-              photo: '',
-              tenantConfig: {}
-            };
-            targetTenantName = 'admin';
-          }
-        }
-
         if (!authenticatedUser) {
           return res.status(401).json({ error: `Invalid username or password for ${targetTenantDoc.tenantName || requestedTenant}.` });
         }
@@ -278,22 +260,27 @@ class AuthController {
           }
         }
 
-        // Default fallback for standard demo admin
+        // Also check master.users for global administrators
         if (!authenticatedUser) {
-          if (cleanUsername.toLowerCase() === 'admin' && (cleanPassword === 'admin123' || cleanPassword === 'password' || cleanPassword === 'password123' || cleanPassword === 'admin')) {
-            authenticatedUser = {
-              username: 'admin',
-              role: 'global_admin',
-              tenantId: 'admin',
-              tenantName: 'admin',
-              fullName: 'Super Administrator',
-              email: 'admin@isomorphic.com',
-              phone: '',
-              photo: '',
-              tenantConfig: {}
-            };
-            targetTenantName = 'admin';
-          }
+          try {
+            const masterUser = await masterDb.collection('users').findOne({ 
+              $or: [{ username: cleanUsername }, { username: userRegex }] 
+            });
+            if (masterUser && checkPass(masterUser.password)) {
+              authenticatedUser = {
+                username: masterUser.username,
+                role: masterUser.role || 'global_admin',
+                tenantId: masterUser.tenantId || 'admin',
+                tenantName: 'admin',
+                fullName: masterUser.fullName || masterUser.username,
+                email: masterUser.email || `${masterUser.username}@isomorphic.com`,
+                phone: masterUser.phone || '',
+                photo: masterUser.photo || '',
+                tenantConfig: {}
+              };
+              targetTenantName = 'admin';
+            }
+          } catch (e) {}
         }
 
         if (!authenticatedUser) {
@@ -602,16 +589,22 @@ class AuthController {
   async getUsers(req, res, next) {
     try {
       const { tenantId } = req.query;
-      const filter = {};
-      if (tenantId) filter.tenantId = tenantId;
+      const masterDb = this.getMasterDb();
       
-      const users = await User.find(filter, { 
-        password: 0, 
-        username: 1, role: 1, tenantId: 1, 
-        fullName: 1, email: 1, phone: 1, photo: 1, createdAt: 1 
-      }).sort({ createdAt: -1 });
+      let users = [];
+      if (tenantId && tenantId !== 'admin' && tenantId !== 'all') {
+        const tDbName = tenantId.startsWith('iso_') ? tenantId : `iso_${tenantId}`;
+        const tDb = mongoose.connection.useDb(tDbName, { useCache: true });
+        users = await tDb.collection('users').find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
+      } else {
+        users = await masterDb.collection('users').find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
+        if (users.length === 0) {
+          const fallback = await User.find({}, { password: 0 }).sort({ createdAt: -1 }).lean();
+          users = fallback;
+        }
+      }
       
-      return res.json(users);
+      return res.json(users.map(u => ({ ...u, _id: u._id?.toString() })));
     } catch (err) {
       next(err);
     }
@@ -623,23 +616,52 @@ class AuthController {
       if (!username || !password || !role) {
         return res.status(400).json({ error: 'Username, password, and role are required.' });
       }
-      const existing = await User.findOne({ username });
-      if (existing) {
+
+      const cleanUser = username.trim();
+      const hashedPassword = bcrypt.hashSync(password.trim(), 10);
+      const masterDb = this.getMasterDb();
+
+      // Check existing across master and tenant DB
+      const existingInMaster = await masterDb.collection('users').findOne({ username: cleanUser });
+      if (existingInMaster) {
         return res.status(400).json({ error: 'Username already taken.' });
       }
 
-      const hashedPassword = bcrypt.hashSync(password.trim(), 10);
-      const user = await User.create({
-        username: username.trim(),
+      const userDoc = {
+        username: cleanUser,
         password: hashedPassword,
         role,
         tenantId: tenantId || null,
+        fullName: fullName || cleanUser,
+        email: email || '',
+        phone: phone || '',
+        photo: '',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      // Insert into master users
+      const masterRes = await masterDb.collection('users').insertOne({ ...userDoc });
+
+      // If tenantId specified, mirror insert into tenant DB
+      if (tenantId && tenantId !== 'admin') {
+        const tDbName = tenantId.startsWith('iso_') ? tenantId : `iso_${tenantId}`;
+        const tDb = mongoose.connection.useDb(tDbName, { useCache: true });
+        await tDb.collection('users').insertOne({ ...userDoc }).catch(() => {});
+      }
+
+      // Also create via Mongoose User model for schema compatibility
+      await User.create({
+        username: cleanUser,
+        password: hashedPassword,
+        role,
+        tenantId: mongoose.Types.ObjectId.isValid(tenantId) ? tenantId : null,
         fullName: fullName || '',
         email: email || '',
         phone: phone || ''
-      });
+      }).catch(() => {});
 
-      const resUser = user.toObject();
+      const resUser = { ...userDoc, _id: masterRes.insertedId.toString() };
       delete resUser.password;
       return res.status(201).json(resUser);
     } catch (err) {
@@ -650,9 +672,9 @@ class AuthController {
   async updateUser(req, res, next) {
     try {
       const { id } = req.params;
-      const { password, role, fullName, email, phone, photo } = req.body;
+      const { password, role, fullName, email, phone, photo, tenantId } = req.body;
       
-      const updateData = {};
+      const updateData = { updatedAt: new Date() };
       if (password && password.trim()) updateData.password = bcrypt.hashSync(password.trim(), 10);
       if (role) updateData.role = role;
       if (fullName !== undefined) updateData.fullName = fullName;
@@ -660,10 +682,30 @@ class AuthController {
       if (phone !== undefined) updateData.phone = phone;
       if (photo !== undefined) updateData.photo = photo;
 
-      const user = await User.findByIdAndUpdate(id, updateData, { new: true, select: '-password' });
-      if (!user) return res.status(404).json({ error: 'User not found.' });
+      const masterDb = this.getMasterDb();
+      let filter = {};
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        filter = { $or: [{ _id: new mongoose.Types.ObjectId(id) }, { username: id }] };
+      } else {
+        filter = { username: id };
+      }
+
+      await masterDb.collection('users').updateOne(filter, { $set: updateData });
+
+      if (tenantId && tenantId !== 'admin') {
+        const tDbName = tenantId.startsWith('iso_') ? tenantId : `iso_${tenantId}`;
+        const tDb = mongoose.connection.useDb(tDbName, { useCache: true });
+        await tDb.collection('users').updateOne(filter, { $set: updateData }).catch(() => {});
+      }
+
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        await User.findByIdAndUpdate(id, updateData).catch(() => {});
+      }
+
+      const updatedUser = await masterDb.collection('users').findOne(filter, { projection: { password: 0 } });
+      if (!updatedUser) return res.status(404).json({ error: 'User not found.' });
       
-      return res.json(user);
+      return res.json({ ...updatedUser, _id: updatedUser._id?.toString() });
     } catch (err) {
       next(err);
     }
@@ -672,8 +714,28 @@ class AuthController {
   async deleteUser(req, res, next) {
     try {
       const { id } = req.params;
-      const user = await User.findByIdAndDelete(id);
-      if (!user) return res.status(404).json({ error: 'User not found.' });
+      const { tenantId } = req.query;
+      const masterDb = this.getMasterDb();
+
+      let filter = {};
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        filter = { $or: [{ _id: new mongoose.Types.ObjectId(id) }, { username: id }] };
+      } else {
+        filter = { username: id };
+      }
+
+      await masterDb.collection('users').deleteOne(filter);
+
+      if (tenantId && tenantId !== 'admin') {
+        const tDbName = tenantId.startsWith('iso_') ? tenantId : `iso_${tenantId}`;
+        const tDb = mongoose.connection.useDb(tDbName, { useCache: true });
+        await tDb.collection('users').deleteOne(filter).catch(() => {});
+      }
+
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        await User.findByIdAndDelete(id).catch(() => {});
+      }
+
       return res.json({ success: true, message: 'User deleted.' });
     } catch (err) {
       next(err);

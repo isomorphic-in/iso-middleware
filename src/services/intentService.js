@@ -92,6 +92,19 @@ class IntentService {
       }
     }
 
+    // 0C. Fast Rule-Based Match for Live Human Agent / Transfer Call Requests
+    const transferCallPatterns = [
+      /\b(speak|talk|connect|transfer|switch)\s+(with|to)?\s*(a\s+)?(human|agent|representative|person|staff|live\s+agent|human\s+agent|support\s+agent)\b/i,
+      /\b(i\s+(want|need|would\s+like)\s+to\s+(speak|talk|connect)\s+(with|to)?\s*(a\s+)?(human|agent|person|representative|staff))\b/i,
+      /^(human|agent|live\s+agent|human\s+agent|transfer\s+call|speak\s+to\s+human|talk\s+to\s+human|speak\s+with\s+a\s+human\s+agent)$/i
+    ];
+
+    for (const pattern of transferCallPatterns) {
+      if (pattern.test(cleanQuery)) {
+        return { intent: 'transfer_call', confidence: 0.98, reason: 'Matched live agent transfer request' };
+      }
+    }
+
     // 1. Fast Rule-Based Match for End Chat / Farewells
     if (isEndChatEnabled) {
       const endChatPatterns = [
@@ -421,6 +434,23 @@ class IntentService {
       intent: 'ambiguous',
       tokens: response.tokens,
       model: response.model
+    };
+  }
+
+  /**
+   * Handles human agent transfer / live support request
+   */
+  async handleTransferCall({ query, bot = {}, history = [], genAISettings = null }) {
+    const botName = bot?.botName || bot?.name || 'Assistant';
+    const tenantName = genAISettings?.tenantFullName || bot?.tenantName || 'Enterprise Support';
+
+    return {
+      text: `I'd be happy to connect you with a live representative from **${tenantName}**. Please fill out the brief details below so our staff can assist you promptly.`,
+      intent: 'transfer_call',
+      isTransferCall: true,
+      form: 'transferCall',
+      tokens: { prompt: 20, completion: 40 },
+      model: 'system/transfer-engine'
     };
   }
 
