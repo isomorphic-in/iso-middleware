@@ -12,8 +12,9 @@ const ApiResponse = require('./helpers/apiResponse');
 
 const app = express();
 
-// Security headers with embedding-friendly configuration for the chat widget
+// Security headers with embedding-friendly configuration for the chat widget & external assets
 app.use(helmet({
+  contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginEmbedderPolicy: false
 }));
