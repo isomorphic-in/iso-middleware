@@ -12,13 +12,13 @@ const DEFAULT_BOT_UI_CONFIGS = {
   userQueryFontColor: '#1F2937',
   bgColor: '#ffffff',
   logoUrl: 'https://bbh-product-bucket.s3.us-east-2.amazonaws.com/a04ac944-0efc-4f92-84cd-9463c94f0505.png',
-  botHeaderText: 'ISO AI Assistant',
-  DefaultEmptyMessage: 'Type your message...',
+  botHeaderText: 'Student Services AI',
+  DefaultEmptyMessage: 'Type your academic or campus question...',
   helpNotificationRenderTime: 10000,
-  helpNotificationRenderMsg: 'Hi! I am ISO AI Assistant. I can help answer your questions and resolve common issues.',
+  helpNotificationRenderMsg: 'Welcome to Student Services AI. I can assist with admissions, financial aid, advising, and campus IT help.',
   idleStatMessages: [
-    { message: 'I’m waiting for your next question', time: 180 },
-    { message: 'Since there was no response, we are ending this chat session. Please re-initiate anytime.', time: 240 }
+    { message: 'Are you still with us? Please let me know if you need any additional campus assistance.', time: 180 },
+    { message: 'This student support session has ended due to inactivity. Please initiate a new session whenever you are ready.', time: 240 }
   ],
   chatPosition: 'fixed',
   chatPositionLeft: 'auto',
@@ -32,8 +32,8 @@ const DEFAULT_BOT_UI_CONFIGS = {
   chatMobileIconHeight: '70',
   chatMobileVerticalIconWidth: '90',
   chatMobileVerticalIconHeight: '90',
-  chatIconAltText: 'Chat with Us',
-  chatIconTitleText: 'Chat with Us',
+  chatIconAltText: 'Student Services Assistant',
+  chatIconTitleText: 'Student Services Assistant',
   allowMultiLangSupport: false,
   demoBackgroundUrl: '',
   likeIcon: 'https://bbh-product-bucket.s3.us-east-2.amazonaws.com/dba2acac-c841-47b7-be3f-106ed4b66fef.png',
@@ -44,8 +44,8 @@ const DEFAULT_BOT_UI_CONFIGS = {
   showThumbUpDownFeedbackform: true,
   showHelpButton: true,
   helpButtonUrl: 'https://vsc.blackbelthelp.com/help',
-  poweredBy: 'AI powered by <span>Isomorphic</span>',
-  welcomeMessage: 'Hi! I’m your AI assistant. How can I assist you today?',
+  poweredBy: 'AI Student Services by <span>Isomorphic</span>',
+  welcomeMessage: 'Welcome to Student Services AI. How may I assist you with your academic inquiries, enrollment details, financial aid, or campus resources today?',
   surveySubmitButtonText: 'Submit Feedback',
   surveySubmitButtonColor: '',
   surveySubmitButtonTextColor: '',
@@ -53,27 +53,29 @@ const DEFAULT_BOT_UI_CONFIGS = {
 };
 
 const DEFAULT_GREETING_MESSAGE = [
-  'Hi! I’m your ISO AI Assistant. I specialize in answering questions and assisting with support inquiries. How can I help you today?'
+  'Welcome to Student Services AI! I am here to assist you with academic advising, course registration, financial aid, admissions deadlines, and campus technology support. How may I help you today?'
 ];
 
 const DEFAULT_CUSTOM_FORMS = [
   {
     name: 'transferCall',
-    title: 'Request a Live Agent Call',
+    title: 'Connect with a Student Support Advisor',
     fields: [
       { name: 'fullName', label: 'Full Name', type: 'text', required: true },
+      { name: 'email', label: 'Institutional Email (.edu / primary)', type: 'email', required: true },
       { name: 'phone', label: 'Phone Number', type: 'tel', required: true },
-      { name: 'notes', label: 'Notes', type: 'textarea', required: false }
+      { name: 'studentId', label: 'Student ID Number (Optional)', type: 'text', required: false },
+      { name: 'notes', label: 'Inquiry Details & Academic Department', type: 'textarea', required: false }
     ],
-    submitText: 'Request Call',
+    submitText: 'Submit Advisor Request',
     postbackUrl: '/api/chat/form-submit'
   },
   {
     name: 'survey',
-    title: 'Chat Feedback Survey',
+    title: 'Student Support Feedback & Evaluation',
     fields: [
-      { name: 'rating', label: 'Rating (1-5)', type: 'number', required: true, min: 1, max: 5 },
-      { name: 'comments', label: 'Feedback Comments', type: 'textarea', required: false }
+      { name: 'rating', label: 'Support Quality Rating (1-5)', type: 'number', required: true, min: 1, max: 5 },
+      { name: 'comments', label: 'Comments or suggestions to improve our student services', type: 'textarea', required: false }
     ],
     submitText: 'Submit Feedback',
     postbackUrl: '/api/chat/form-submit'
