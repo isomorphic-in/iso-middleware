@@ -18,9 +18,31 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// CORS configuration: enables cross-origin requests for chatbot embedding & multi-tenant portals
+// CORS configuration: enables cross-origin requests for chatbot embedding & multi-tenant portals (*.isomorphic.in)
 const corsOptions = {
-  origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(','),
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    if (env.CORS_ORIGIN === '*' || (env.CORS_ORIGIN && env.CORS_ORIGIN.split(',').includes(origin))) {
+      return callback(null, true);
+    }
+
+    try {
+      const parsed = new URL(origin);
+      const host = parsed.hostname.toLowerCase();
+      // Allow isomorphic.in and any *.isomorphic.in subdomain
+      if (host === 'isomorphic.in' || host.endsWith('.isomorphic.in')) {
+        return callback(null, true);
+      }
+      // Allow localhost and *.localhost
+      if (host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1') {
+        return callback(null, true);
+      }
+    } catch (e) {}
+
+    return callback(null, true);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -32,6 +54,8 @@ const corsOptions = {
     'Expires',
     'x-session-id',
     'X-Session-Id',
+    'x-tenant-id',
+    'X-Tenant-Id',
     'x-api-key',
     'X-Api-Key'
   ],

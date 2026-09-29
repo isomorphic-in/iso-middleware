@@ -48,6 +48,55 @@ class AuthController {
     return crypto.randomBytes(24).toString('hex');
   }
 
+  // Helper: Extract tenant from request headers (x-tenant-id, host, origin, referer) or body/params/query
+  extractTenantFromRequest(req) {
+    if (!req) return '';
+
+    // 1. Explicit body, params or query
+    const direct = (
+      req.body?.tenantId ||
+      req.body?.tenant ||
+      req.query?.tenantId ||
+      req.query?.tenant ||
+      req.query?.code ||
+      req.params?.identifier ||
+      ''
+    ).trim();
+    if (direct) return direct.toLowerCase();
+
+    // 2. Custom header
+    const headerTenant = (req.headers['x-tenant-id'] || req.headers['x-tenant'] || '').trim();
+    if (headerTenant) return headerTenant.toLowerCase();
+
+    // 3. Subdomain extracted from Host, x-forwarded-host, Origin, or Referer (*.isomorphic.in)
+    const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase().split(':')[0];
+    let originHost = '';
+    if (req.headers.origin) {
+      try { originHost = new URL(req.headers.origin).hostname.toLowerCase(); } catch (e) {}
+    }
+    let refererHost = '';
+    if (req.headers.referer) {
+      try { refererHost = new URL(req.headers.referer).hostname.toLowerCase(); } catch (e) {}
+    }
+
+    for (const h of [originHost, refererHost, host]) {
+      if (!h) continue;
+      if (h === 'admin.isomorphic.in') {
+        return 'admin';
+      }
+      if (h.endsWith('.isomorphic.in')) {
+        const sub = h.slice(0, -'.isomorphic.in'.length).toLowerCase();
+        if (sub && sub !== 'www') return sub;
+      }
+      if (h.endsWith('.localhost')) {
+        const sub = h.slice(0, -'.localhost'.length).toLowerCase();
+        if (sub && sub !== 'www') return sub;
+      }
+    }
+
+    return '';
+  }
+
   // Helper: Resolve dynamic allowed menus for user/role (Cached in Redis)
   async resolveAllowedMenus(userRole, tenantId) {
     const roleKey = (userRole || 'default').toLowerCase().replace(/\s+/g, '_');
@@ -135,7 +184,7 @@ class AuthController {
       const cleanUsername = username.trim();
       const cleanPassword = password.trim();
       const userRegex = new RegExp(`^${cleanUsername}$`, 'i');
-      const requestedTenant = (tenantId || tenant || '').trim().toLowerCase();
+      const requestedTenant = (tenantId || tenant || this.extractTenantFromRequest(req) || '').trim().toLowerCase();
 
       const masterDb = this.getMasterDb();
       let authenticatedUser = null;
@@ -373,6 +422,7 @@ class AuthController {
         req.query?.tenant || 
         req.body?.tenantId || 
         req.body?.tenant || 
+        this.extractTenantFromRequest(req) ||
         ''
       ).trim().toLowerCase();
 
@@ -1072,7 +1122,7 @@ class AuthController {
   // ==========================================
   async getTenantPublicBranding(req, res, next) {
     try {
-      const identifier = (req.params.identifier || req.query.tenant || req.query.tenantId || req.query.code || '').trim();
+      const identifier = (req.params.identifier || req.query.tenant || req.query.tenantId || req.query.code || this.extractTenantFromRequest(req) || '').trim();
       if (!identifier) {
         return res.status(400).json({ error: 'Tenant identifier is required.' });
       }
@@ -1151,7 +1201,7 @@ class AuthController {
     try {
       const { identifier, username, email, tenant, tenantId, baseUrl } = req.body;
       const cleanIdent = (identifier || username || email || '').trim();
-      const requestedTenant = (tenant || tenantId || '').trim().toLowerCase();
+      const requestedTenant = (tenant || tenantId || this.extractTenantFromRequest(req) || '').trim().toLowerCase();
 
       if (!cleanIdent) {
         return res.status(400).json({ error: 'Please provide your registered username or email address.' });
@@ -1283,11 +1333,27 @@ class AuthController {
         logger.warn(`Could not persist reset token in DB document: ${dbErr.message}`);
       }
 
-      // Construct Reset URL
-      const hostUrl = baseUrl || req.headers.origin || (req.headers.referer ? req.headers.referer.split('/login')[0] : 'http://localhost:5173');
-      const tenantSlug = resolvedTenantDoc ? (resolvedTenantDoc.tenantId || resolvedTenantDoc.code || resolvedTenantDoc.tenantName) : requestedTenant;
-      const resetPath = tenantSlug ? `/login/${encodeURIComponent(tenantSlug)}` : '/login';
-      const resetLink = `${hostUrl}${resetPath}?resetToken=${resetToken}&username=${encodeURIComponent(targetUser.username)}`;
+      // Construct Reset URL using *.isomorphic.in subdomain
+      const tenantSlug = (resolvedTenantDoc ? (resolvedTenantDoc.tenantId || resolvedTenantDoc.code || resolvedTenantDoc.tenantName) : requestedTenant) || 'admin';
+
+      let hostUrl = baseUrl || req.headers.origin || (req.headers.referer ? req.headers.referer.split('/login')[0].split('?')[0] : '');
+
+      if (!hostUrl || (!hostUrl.includes('localhost') && !hostUrl.includes('127.0.0.1'))) {
+        hostUrl = `https://${encodeURIComponent(tenantSlug.toLowerCase())}.isomorphic.in`;
+      } else {
+        // If on localhost development
+        try {
+          const parsed = new URL(hostUrl);
+          if (parsed.hostname === 'localhost' || parsed.hostname.endsWith('.localhost')) {
+            if (tenantSlug && tenantSlug !== 'admin') {
+              parsed.hostname = `${encodeURIComponent(tenantSlug.toLowerCase())}.localhost`;
+              hostUrl = parsed.origin;
+            }
+          }
+        } catch (e) {}
+      }
+
+      const resetLink = `${hostUrl.replace(/\/$/, '')}/?resetToken=${resetToken}&username=${encodeURIComponent(targetUser.username)}`;
 
       // Send Email
       let emailResult = null;

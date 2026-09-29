@@ -76,20 +76,20 @@ class EmailService {
             </div>
           </div>
           <div class="footer">
-            &copy; ${new Date().getFullYear()} ${supportTitle} • Organization: ${orgTitle}
+            &copy; ${new Date().getFullYear()} ${supportTitle} • Contact: <a href="mailto:help@isomorphic.in" style="color: #64748b; text-decoration: underline;">help@isomorphic.in</a> • Organization: ${orgTitle}
           </div>
         </div>
       </body>
       </html>
     `;
 
-    const textContent = `Hello ${username},\n\nWe received a request to reset your password for your ${orgTitle} organization account.\n\nPlease reset your password using the following link:\n${resetLink}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this email.\n\nBest regards,\n${supportTitle}`;
+    const textContent = `Hello ${username},\n\nWe received a request to reset your password for your ${orgTitle} organization account.\n\nPlease reset your password using the following link:\n${resetLink}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this email.\n\nNeed assistance? Contact us at help@isomorphic.in\n\nBest regards,\n${supportTitle}`;
 
-    const user = (process.env.SMTP_USER || '').trim();
-    const rawFrom = process.env.SMTP_FROM || (user ? `"${supportTitle}" <${user}>` : `"${supportTitle}" <noreply@isomorphic.ai>`);
+    const defaultFromEmail = 'help@isomorphic.in';
+    const rawFrom = process.env.SMTP_FROM || `"${supportTitle}" <${defaultFromEmail}>`;
     const fromAddress = rawFrom.replace(/^["']|["']$/g, '').trim();
 
-    logger.info(`[EmailService] Sending password reset email to "${to}" for user "${username}"...`);
+    logger.info(`[EmailService] Sending password reset email from "${fromAddress}" to "${to}" for user "${username}"...`);
 
     // =========================================================================
     // PRIMARY METHOD: Google Apps Script Webhook (Instant HTTPS directly from Gmail)
@@ -102,7 +102,9 @@ class EmailService {
           subject,
           html,
           text: textContent,
-          senderName: supportTitle
+          senderName: supportTitle,
+          senderEmail: defaultFromEmail,
+          replyTo: defaultFromEmail
         }, {
           headers: { 'Content-Type': 'application/json' },
           timeout: 10000,
@@ -110,7 +112,7 @@ class EmailService {
         });
 
         if (res.status >= 200 && res.status < 400) {
-          logger.info(`[EmailService] ⚡ Email sent instantly via Google Apps Script (Official Gmail)! Recipient: ${to}`);
+          logger.info(`[EmailService] ⚡ Email sent instantly via Google Apps Script (help@isomorphic.in)! Recipient: ${to}`);
           return { success: true, messageId: 'gmail-script-' + Date.now() };
         }
       } catch (scriptErr) {
@@ -121,6 +123,7 @@ class EmailService {
     // =========================================================================
     // FALLBACK: Direct SMTP (Only if GMAIL_SCRIPT_URL is not configured or failed)
     // =========================================================================
+    const user = (process.env.SMTP_USER || '').trim();
     if (user && process.env.SMTP_PASS) {
       try {
         const rawPass = (process.env.SMTP_PASS || '').trim();
@@ -141,13 +144,14 @@ class EmailService {
 
         const info = await transporter.sendMail({
           from: fromAddress,
+          replyTo: defaultFromEmail,
           to,
           subject,
           html,
           text: textContent
         });
 
-        logger.info(`[EmailService] Email sent via direct SMTP! MessageId: ${info.messageId}`);
+        logger.info(`[EmailService] Email sent via direct SMTP from "${fromAddress}"! MessageId: ${info.messageId}`);
         return { success: true, messageId: info.messageId };
       } catch (smtpErr) {
         logger.warn(`[EmailService] Direct SMTP failed: ${smtpErr.message}`);
