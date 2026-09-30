@@ -6,6 +6,7 @@ const adminController = require('../controllers/adminController');
 router.get('/admin/tenants', (req, res, next) => adminController.getTenants(req, res, next));
 router.post('/admin/tenants', (req, res, next) => adminController.createTenant(req, res, next));
 router.put('/admin/tenants/:id', (req, res, next) => adminController.updateTenant(req, res, next));
+router.put('/admin/tenants/:id/contract', (req, res, next) => adminController.updateTenantContract(req, res, next));
 router.delete('/admin/tenants/:id', (req, res, next) => adminController.deleteTenant(req, res, next));
 
 // Bots API

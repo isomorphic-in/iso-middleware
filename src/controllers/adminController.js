@@ -75,6 +75,7 @@ class AdminController {
           Bots: t.Bots || [],
           tenantActive: t.tenantActive !== undefined ? t.tenantActive : true,
           tenantConfig: t.tenantConfig || {},
+          contract: t.contract || {},
           createdAt: t.createdAt || new Date()
         }));
       });
@@ -104,7 +105,7 @@ class AdminController {
    */
   async createTenant(req, res, next) {
     try {
-      const { name, tenantName, code, tenantId, tenantDbName, tenantActive, tenantConfig, Bots } = req.body;
+      const { name, tenantName, code, tenantId, tenantDbName, tenantActive, tenantConfig, contract, Bots } = req.body;
       const finalName = (tenantName || name || '').trim();
       const finalCode = (tenantId || code || '').toLowerCase().trim();
 
@@ -148,6 +149,32 @@ class AdminController {
         ...(tenantConfig || {})
       };
 
+      const mergedContract = {
+        contractNumber: contract?.contractNumber || `ISO-CTR-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        startDate: contract?.startDate || '',
+        endDate: contract?.endDate || '',
+        renewedOn: contract?.renewedOn || '',
+        contractTerm: contract?.contractTerm || '1 Year',
+        contractStatus: contract?.contractStatus || 'Active',
+        billingCycle: contract?.billingCycle || 'Annually',
+        contractValue: contract?.contractValue || '',
+        currency: contract?.currency || 'USD',
+        paymentTerms: contract?.paymentTerms || 'Net 30',
+        paymentStatus: contract?.paymentStatus || 'Current',
+        autoRenew: contract?.autoRenew !== undefined ? Boolean(contract.autoRenew) : false,
+        renewalNoticeDays: contract?.renewalNoticeDays !== undefined ? Number(contract.renewalNoticeDays) : 30,
+        slaTier: contract?.slaTier || 'Standard (99.5%)',
+        maxBotsIncluded: contract?.maxBotsIncluded !== undefined ? Number(contract.maxBotsIncluded) : 5,
+        monthlyInquiryLimit: contract?.monthlyInquiryLimit || '50,000 inquiries',
+        accountManager: contract?.accountManager || '',
+        primaryContactName: contract?.primaryContactName || '',
+        primaryContactEmail: contract?.primaryContactEmail || '',
+        primaryContactPhone: contract?.primaryContactPhone || '',
+        documentUrl: contract?.documentUrl || '',
+        notes: contract?.notes || '',
+        ...(contract || {})
+      };
+
       const newTenant = {
         tenantId: finalCode,
         tenantName: finalName,
@@ -155,6 +182,7 @@ class AdminController {
         Bots: initialBots,
         tenantActive: tenantActive !== undefined ? Boolean(tenantActive) : true,
         tenantConfig: mergedTenantConfig,
+        contract: mergedContract,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -243,7 +271,7 @@ class AdminController {
   async updateTenant(req, res, next) {
     try {
       const { id } = req.params;
-      const { name, tenantName, code, tenantId, tenantDbName, tenantActive, tenantConfig, Bots } = req.body;
+      const { name, tenantName, code, tenantId, tenantDbName, tenantActive, tenantConfig, contract, Bots } = req.body;
 
       const col = this.getTenantInfoCollection();
       let filter = {};
@@ -278,6 +306,12 @@ class AdminController {
         updateFields.tenantConfig = {
           ...(existingTenant.tenantConfig || {}),
           ...tenantConfig
+        };
+      }
+      if (contract && typeof contract === 'object') {
+        updateFields.contract = {
+          ...(existingTenant.contract || {}),
+          ...contract
         };
       }
 
@@ -322,6 +356,59 @@ class AdminController {
       return res.json(normalized);
     } catch (err) {
       logger.error(`Error updating tenant in master.tenantInfo: ${err.message}`);
+      next(err);
+    }
+  }
+
+  /**
+   * PUT /api/admin/tenants/:id/contract
+   * Update or renew contract details for a specific tenant
+   */
+  async updateTenantContract(req, res, next) {
+    try {
+      const { id } = req.params;
+      const contractData = req.body;
+
+      if (!contractData || typeof contractData !== 'object') {
+        return res.status(400).json({ error: 'Valid contract payload is required.' });
+      }
+
+      const col = this.getTenantInfoCollection();
+      let filter = {};
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        filter = { _id: new mongoose.Types.ObjectId(id) };
+      } else {
+        filter = { tenantId: id };
+      }
+
+      const existingTenant = await col.findOne(filter);
+      if (!existingTenant) {
+        return res.status(404).json({ error: 'Tenant document not found in master.tenantInfo' });
+      }
+
+      const updatedContract = {
+        ...(existingTenant.contract || {}),
+        ...contractData,
+        updatedAt: new Date()
+      };
+
+      const result = await col.findOneAndUpdate(
+        filter,
+        { $set: { contract: updatedContract, updatedAt: new Date() } },
+        { returnDocument: 'after' }
+      );
+
+      await cacheService.del('portal:tenants');
+
+      logger.info(`Updated contract for tenant "${existingTenant.tenantName || existingTenant.tenantId}" in master.tenantInfo`);
+      return res.json({
+        success: true,
+        message: 'Contract updated successfully',
+        tenantId: existingTenant.tenantId,
+        contract: updatedContract
+      });
+    } catch (err) {
+      logger.error(`Error updating tenant contract: ${err.message}`);
       next(err);
     }
   }
@@ -924,6 +1011,23 @@ class AdminController {
           menus = await masterDb.collection('menus').find({}).sort({ sortOrder: 1 }).toArray();
         }
 
+        // Ensure contract_summary menu is registered
+        const hasContractSummary = menus.some(m => m.menuId === 'contract_summary' || m.path === 'contract_summary');
+        if (!hasContractSummary) {
+          const contractMenu = {
+            menuId: 'contract_summary',
+            label: 'Contract Summary',
+            icon: 'FileText',
+            path: 'contract_summary',
+            sortOrder: 3,
+            active: true,
+            description: 'Tenant contract lifecycle, renewal dates, SLA agreements, and billing terms',
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          await masterDb.collection('menus').insertOne(contractMenu);
+          menus = await masterDb.collection('menus').find({}).sort({ sortOrder: 1 }).toArray();
+        }
 
         return menus.map(m => ({ ...m, _id: m._id.toString() }));
       });

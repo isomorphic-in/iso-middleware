@@ -119,14 +119,14 @@ class AuthController {
           allowedMenus = roleDoc.allowedMenus;
         } else if (userRole === 'Super Admin' || userRole === 'super_admin' || userRole === 'global_admin' || !tenantId) {
           const activeMenus = await masterDb.collection('menus').find({ active: true }).sort({ sortOrder: 1 }).toArray();
-          allowedMenus = activeMenus.length > 0 ? activeMenus.map(m => m.menuId) : ['tenants', 'grievances', 'analytics', 'performance', 'ingestion', 'conversations', 'chat'];
+          allowedMenus = activeMenus.length > 0 ? activeMenus.map(m => m.menuId) : ['tenants', 'contract_summary', 'grievances', 'analytics', 'performance', 'ingestion', 'conversations', 'chat'];
         } else {
-          allowedMenus = ['grievances', 'analytics', 'performance', 'ingestion', 'chat'];
+          allowedMenus = ['contract_summary', 'grievances', 'analytics', 'performance', 'ingestion', 'chat'];
         }
         return allowedMenus;
       } catch (err) {
         logger.error(`Error resolving allowed menus: ${err.message}`);
-        return ['tenants', 'grievances', 'analytics', 'performance', 'ingestion', 'conversations', 'chat'];
+        return ['tenants', 'contract_summary', 'grievances', 'analytics', 'performance', 'ingestion', 'conversations', 'chat'];
       }
     });
   }
